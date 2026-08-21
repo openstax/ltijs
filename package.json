@@ -9,9 +9,12 @@
   },
   "scripts": {
     "test": "MONGOMS_VERSION=7.0.3 NODE_TLS_REJECT_UNAUTHORIZED=0 nyc mocha",
+    "clean": "rm -rf dist",
     "build:js": "babel src -d dist",
     "build:html": "node copy-html-files.js",
     "build": "npm run build:js && npm run build:html",
+    "build:clean": "npm run clean && npm run build",
+    "prepublishOnly": "npm i && npm run build:clean",
     "start": "node index.js"
   },
   "publishConfig": {

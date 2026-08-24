@@ -80,12 +80,16 @@ class Auth {
     // the iss-cookie check above to be skipped, iss flows into the database query below unchecked too - per
     // RFC 7519 4.1.1, iss must be a string; per 4.1.3, aud must be a string or an array of strings
     if (typeof decoded.payload.iss !== 'string') throw new Error('INVALID_ISS_CLAIM')
-    if (!Array.isArray(decoded.payload.aud) && typeof decoded.payload.aud !== 'string') throw new Error('INVALID_AUD_CLAIM')
+    // Reject the whole claim if it isn't a string, or an array where every element is a string - a mixed
+    // array (e.g. ['ClientId1', {$ne: null}]) must not be allowed to succeed by silently skipping the bad
+    // element while still trying the valid ones
+    if (Array.isArray(decoded.payload.aud)) {
+      if (!decoded.payload.aud.every(aud => typeof aud === 'string')) throw new Error('INVALID_AUD_CLAIM')
+    } else if (typeof decoded.payload.aud !== 'string') throw new Error('INVALID_AUD_CLAIM')
     let platform
     if (!Array.isArray(decoded.payload.aud)) platform = await getPlatform(decoded.payload.iss, decoded.payload.aud, ENCRYPTIONKEY, Database)
     else {
       for (const aud of decoded.payload.aud) {
-        if (typeof aud !== 'string') continue
         platform = await getPlatform(decoded.payload.iss, aud, ENCRYPTIONKEY, Database)
         if (platform) break
       }

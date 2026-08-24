@@ -163,6 +163,15 @@ describe('Testing Auth.validateToken hardening against non-string iss/aud claims
 
     await expect(Auth.validateToken(payload, true, { iss: undefined, maxAge: false }, lti.getPlatform, ENCRYPTIONKEY, lti.Database)).to.be.rejectedWith('INVALID_AUD_CLAIM')
   })
+
+  it('Auth.validateToken expected to reject a mixed aud array instead of silently skipping the invalid element and matching on the valid one', async () => {
+    const token = JSON.parse(JSON.stringify(tokenValid))
+    token.aud = [CLIENT_ID, { $ne: null }]
+    token.nonce = randomState()
+    const payload = signToken(token, KID)
+
+    await expect(Auth.validateToken(payload, true, { iss: undefined, maxAge: false }, lti.getPlatform, ENCRYPTIONKEY, lti.Database)).to.be.rejectedWith('INVALID_AUD_CLAIM')
+  })
 })
 
 describe('Testing LTI Client Side postMessage storage handshake (LTI-CS-OIDC v0.1)', function () {

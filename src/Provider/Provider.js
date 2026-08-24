@@ -374,7 +374,7 @@ class Provider {
               viaStorage: stateViaStorage
             }
             // Signing context token
-            const newLtik = jwt.sign(newLtikObj, this.#ENCRYPTIONKEY)
+            const newLtik = jwt.sign(newLtikObj, this.#ENCRYPTIONKEY, { expiresIn: '1d' })
 
             if (this.#ltiaas) {
               // Appending query parameters

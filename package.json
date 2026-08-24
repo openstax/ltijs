@@ -15,7 +15,8 @@
     "build:html": "node copy-html-files.js",
     "build": "npm run build:js && npm run build:html",
     "build:clean": "npm run clean && npm run build",
-    "prepublishOnly": "npm install && npm run build:clean",
+    "prepublishOnly": "npm install",
+    "prepare": "npm run build:clean",
     "prestart": "npm run build:clean",
     "start": "node index.js"
   },

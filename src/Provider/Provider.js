@@ -9,6 +9,7 @@ const Platform = require('../Utils/Platform')
 const Auth = require('../Utils/Auth')
 const DB = require('../Utils/Database')
 const Keyset = require('../Utils/Keyset')
+const Storage = require('../Utils/Storage')
 
 const GradeService = require('./Services/Grade')
 const DeepLinkingService = require('./Services/DeepLinking')
@@ -45,6 +46,9 @@ class Provider {
 
   #tokenMaxAge = 10
 
+  #storagePutTimeout = 0
+  #storageGetTimeout = 5
+
   #cookieOptions = {
     secure: false,
     httpOnly: true,
@@ -60,8 +64,9 @@ class Provider {
 
   #dynamicRegistrationCallback = async (req, res, next) => {
     try {
-      if (!req.query.openid_configuration) return res.status(400).send({ status: 400, error: 'Bad Request', details: { message: 'Missing parameter: "openid_configuration".' } })
-      const message = await this.DynamicRegistration.register(req.query.openid_configuration, req.query.registration_token)
+      if (typeof req.query.openid_configuration !== 'string' || !req.query.openid_configuration) return res.status(400).send({ status: 400, error: 'Bad Request', details: { message: 'Missing parameter: "openid_configuration".' } })
+      const registrationToken = typeof req.query.registration_token === 'string' ? req.query.registration_token : undefined
+      const message = await this.DynamicRegistration.register(req.query.openid_configuration, registrationToken)
       res.setHeader('Content-type', 'text/html')
       res.send(message)
     } catch (err) {
@@ -128,6 +133,9 @@ class Provider {
      * @param {String} [options.cookies.domain] - Cookie domain parameter. This parameter can be used to specify a domain so that the cookies set by Ltijs can be shared between subdomains.
      * @param {Boolean} [options.devMode = false] - If true, does not require state and session cookies to be present (If present, they are still validated). This allows ltijs to work on development environments where cookies cannot be set. THIS SHOULD NOT BE USED IN A PRODUCTION ENVIRONMENT.
      * @param {Number} [options.tokenMaxAge = 10] - Sets the idToken max age allowed in seconds. Defaults to 10 seconds. If false, disables max age validation.
+     * @param {Object} [options.ltiStorage] - Configuration for the LTI Client Side Postmessage storage handshake (https://www.imsglobal.org/spec/lti-cs-oidc/v0p1), used as a fallback when the platform advertises support (via lti_storage_target) and/or when the state cookie can't be read back (e.g. blocked third-party cookies).
+     * @param {Number} [options.ltiStorage.putTimeout = 0] - Seconds to wait for the platform's lti.put_data.response before continuing the login redirect. 0 (default) means don't wait at all.
+     * @param {Number} [options.ltiStorage.getTimeout = 5] - Seconds to wait for the platform's lti.get_data.response when recovering state because the state cookie was not received.
      * @param {Object} [options.dynReg] - Setup for the Dynamic Registration Service.
      * @param {String} [options.dynReg.url] - Tool Provider main URL. (Ex: 'https://tool.example.com')
      * @param {String} [options.dynReg.name] - Tool Provider name. (Ex: 'Tool Provider')
@@ -160,6 +168,11 @@ class Provider {
     if (options && options.devMode === true) this.#devMode = true
     if (options && options.ltiaas === true) this.#ltiaas = true
     if (options && options.tokenMaxAge !== undefined) this.#tokenMaxAge = options.tokenMaxAge
+
+    if (options && options.ltiStorage) {
+      if (options.ltiStorage.putTimeout !== undefined) this.#storagePutTimeout = options.ltiStorage.putTimeout
+      if (options.ltiStorage.getTimeout !== undefined) this.#storageGetTimeout = options.ltiStorage.getTimeout
+    }
 
     // Cookie options
     if (options && options.cookies) {
@@ -214,6 +227,10 @@ class Provider {
 
       provMainDebug('Path does not match reserved endpoints')
 
+      // Caches the 'state' doc lookup so the storage-recovery check and the catch block's cleanup below
+      // don't both query it on the same request (e.g. cookie missing, no storage-target flow used)
+      let cachedStateDoc
+
       try {
         // Retrieving ltik token
         const ltik = req.token
@@ -229,14 +246,41 @@ class Provider {
             provMainDebug('Received idtoken for validation')
 
             // Retrieves state
-            const state = req.body.state
+            const state = Storage.sanitizeState(req.body.state)
 
             // Retrieving validation parameters from cookies
             provAuthDebug('Response state: ' + state)
             const validationCookie = cookies['state' + state]
 
+            const isStorageRecovery = req.body.lti_storage_recovery === '1'
+            let localStorageIss
+
+            if (!validationCookie && !isStorageRecovery && state) {
+              // Cookie missing - check if this state used the LTI Client Side Postmessage storage flow
+              // (https://www.imsglobal.org/spec/lti-cs-oidc/v0p1) before giving up on recovering iss
+              cachedStateDoc = await this.Database.Get(false, 'state', { state })
+              const storageInfo = cachedStateDoc && cachedStateDoc[0] && cachedStateDoc[0].storage
+              if (storageInfo && storageInfo.platformOrigin) {
+                provMainDebug('State cookie missing; storage-target flow was used at login, rendering recovery page')
+                const html = Storage.renderGetPage({
+                  platformOrigin: storageInfo.platformOrigin,
+                  frameName: storageInfo.frameName || '_parent',
+                  key: Storage.buildKey(state),
+                  getTimeoutMs: this.#storageGetTimeout * 1000,
+                  idToken: idtoken,
+                  state
+                })
+                res.setHeader('Content-type', 'text/html')
+                res.setHeader('Cache-Control', 'no-store')
+                res.setHeader('Pragma', 'no-cache')
+                return res.send(html)
+              }
+            } else if (isStorageRecovery && state) {
+              localStorageIss = Storage.verifyValue(req.body.lti_storage_iss, state, this.#ENCRYPTIONKEY)
+            }
+
             const validationParameters = {
-              iss: validationCookie,
+              iss: validationCookie || localStorageIss,
               maxAge: this.#tokenMaxAge
             }
 
@@ -329,7 +373,7 @@ class Provider {
               // Appending query parameters
               res.locals.query = {}
               if (savedState) {
-                for (const [key, value] of Object.entries(savedState[0].query)) {
+                for (const [key, value] of Object.entries(savedState[0].query || {})) {
                   req.query[key] = value
                   res.locals.query[key] = value
                 }
@@ -347,7 +391,7 @@ class Provider {
             // Appending query parameters
             const query = new URLSearchParams(req.query)
             if (savedState) {
-              for (const [key, value] of Object.entries(savedState[0].query)) {
+              for (const [key, value] of Object.entries(savedState[0].query || {})) {
                 query.append(key, value)
               }
             }
@@ -356,7 +400,7 @@ class Provider {
             provMainDebug('Redirecting to endpoint with ltik')
             return res.redirect(req.baseUrl + req.path + '?' + urlSearchParams)
           } else {
-            const state = req.body.state
+            const state = Storage.sanitizeState(req.body.state)
             if (state) {
               provMainDebug('Deleting state cookie and Database entry')
               const savedState = await this.Database.Get(false, 'state', { state })
@@ -454,10 +498,11 @@ class Provider {
           return this.#sessionTimeoutCallback(req, res, next)
         }
       } catch (err) {
-        const state = req.body.state
+        const state = Storage.sanitizeState(req.body.state)
         if (state) {
           provMainDebug('Deleting state cookie and Database entry')
-          const savedState = await this.Database.Get(false, 'state', { state })
+          // Reuses the lookup already performed above (storage-recovery check) instead of querying again
+          const savedState = cachedStateDoc !== undefined ? cachedStateDoc : await this.Database.Get(false, 'state', { state })
           res.clearCookie('state' + state, this.#cookieOptions)
           if (savedState) this.Database.Delete('state', { state })
         }
@@ -482,7 +527,13 @@ class Provider {
     this.app.all(this.#loginRoute, async (req, res) => {
       const params = { ...req.query, ...req.body }
       try {
-        if (!params.iss || !params.login_hint || !params.target_link_uri) return res.status(400).send({ status: 400, error: 'Bad Request', details: { message: 'MISSING_LOGIN_PARAMETERS' } })
+        if (
+          !params.iss || !params.login_hint || !params.target_link_uri ||
+          typeof params.iss !== 'string' || typeof params.login_hint !== 'string' || typeof params.target_link_uri !== 'string' ||
+          (params.client_id !== undefined && typeof params.client_id !== 'string') ||
+          (params.lti_message_hint !== undefined && typeof params.lti_message_hint !== 'string') ||
+          (params.lti_deployment_id !== undefined && typeof params.lti_deployment_id !== 'string')
+        ) return res.status(400).send({ status: 400, error: 'Bad Request', details: { message: 'MISSING_LOGIN_PARAMETERS' } })
         const iss = params.iss
         const clientId = params.client_id
         provMainDebug('Receiving a login request from: ' + iss + ', clientId: ' + clientId)
@@ -498,23 +549,38 @@ class Provider {
           // Create state parameter used to validade authentication response
           let state = encodeURIComponent(crypto.randomBytes(25).toString('hex'))
 
+          // Check if the platform advertised support for the LTI Client Side Postmessage storage handshake
+          // (https://www.imsglobal.org/spec/lti-cs-oidc/v0p1) as a fallback for when the state cookie can't
+          // round-trip (e.g. blocked third-party cookies)
+          const storageTargetRequested = typeof params.lti_storage_target === 'string' && params.lti_storage_target.length > 0
+          const storage = storageTargetRequested
+            ? { platformOrigin: new URL(await platform.platformAuthEndpoint()).origin, frameName: Storage.sanitizeFrameName(params.lti_storage_target) }
+            : undefined
+
           provMainDebug('Target Link URI: ', params.target_link_uri)
-          /* istanbul ignore next */
-          // Cleaning up target link uri and retrieving query parameters
-          if (params.target_link_uri.includes('?')) {
-            // Retrieve raw queries
-            const rawQueries = new URLSearchParams('?' + params.target_link_uri.split('?')[1])
+          // Cleaning up target link uri, retrieving query parameters, and persisting state - all gated on the
+          // same condition so they can't drift out of sync with each other
+          const willPersistState = params.target_link_uri.includes('?') || storageTargetRequested
+          let queries
+          if (willPersistState) {
             // Check if state is unique
             while (await this.Database.Get(false, 'state', { state })) state = encodeURIComponent(crypto.randomBytes(25).toString('hex'))
             provMainDebug('Generated state: ', state)
-            // Assemble queries object
-            const queries = {}
-            for (const [key, value] of rawQueries) { queries[key] = value }
-            params.target_link_uri = params.target_link_uri.split('?')[0]
-            provMainDebug('Query parameters found: ', queries)
-            provMainDebug('Final Redirect URI: ', params.target_link_uri)
-            // Store state and query parameters on database
-            await this.Database.Insert(false, 'state', { state, query: queries })
+
+            /* istanbul ignore next */
+            if (params.target_link_uri.includes('?')) {
+              // Retrieve raw queries
+              const rawQueries = new URLSearchParams('?' + params.target_link_uri.split('?')[1])
+              // Assemble queries object
+              queries = {}
+              for (const [key, value] of rawQueries) { queries[key] = value }
+              params.target_link_uri = params.target_link_uri.split('?')[0]
+              provMainDebug('Query parameters found: ', queries)
+              provMainDebug('Final Redirect URI: ', params.target_link_uri)
+            }
+
+            // Store state, query parameters and storage-target info (if used) on database
+            await this.Database.Insert(false, 'state', { state, query: queries || {}, storage })
           }
 
           // Setting up validation info
@@ -526,10 +592,29 @@ class Provider {
           const query = await Request.ltiAdvantageLogin(params, platform, state)
           provMainDebug('Login request: ')
           provMainDebug(query)
-          res.redirect(url.format({
+          const redirectUrl = url.format({
             pathname: await platform.platformAuthEndpoint(),
             query
-          }))
+          })
+
+          if (storageTargetRequested) {
+            // Render a client-side page that attempts to also store the signed iss value via lti.put_data
+            // before redirecting - the state cookie above is still set unconditionally as the primary mechanism
+            const html = Storage.renderPutPage({
+              platformOrigin: storage.platformOrigin,
+              frameName: storage.frameName,
+              key: Storage.buildKey(state),
+              value: Storage.signValue(iss, state, this.#ENCRYPTIONKEY),
+              putTimeoutMs: this.#storagePutTimeout * 1000,
+              redirectUrl
+            })
+            res.setHeader('Content-type', 'text/html')
+            res.setHeader('Cache-Control', 'no-store')
+            res.setHeader('Pragma', 'no-cache')
+            return res.send(html)
+          }
+
+          res.redirect(redirectUrl)
         } else {
           provMainDebug('Unregistered platform attempting connection: ' + iss + ', clientId: ' + clientId)
           return this.#unregisteredPlatformCallback(req, res)

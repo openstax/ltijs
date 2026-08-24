@@ -1,0 +1,67 @@
+<script>
+(function () {
+  function resolveTargetFrame (frameName) {
+    try {
+      return frameName === '_parent' ? window.parent : window.parent.frames[frameName]
+    } catch (err) {
+      return undefined
+    }
+  }
+
+  function genMessageId () {
+    return 'ltijs_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2)
+  }
+
+  window.ltijsStorageRequest = function (subject, key, value, platformOrigin, frameName, timeoutMs) {
+    return new Promise(function (resolve) {
+      var messageId = genMessageId()
+      var settled = false
+      var targetFrame = resolveTargetFrame(frameName)
+
+      function cleanup () {
+        window.removeEventListener('message', onMessage)
+      }
+
+      function settle (result) {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve(result)
+      }
+
+      function onMessage (event) {
+        if (event.origin !== platformOrigin) return
+        var data = event.data
+        if (!data || data.message_id !== messageId) return
+        if (data.subject !== subject + '.response') return
+        settle(data)
+      }
+
+      // Listener must be registered before the message is sent, or the response could be missed.
+      window.addEventListener('message', onMessage)
+
+      if (!targetFrame) {
+        settle(undefined)
+        return
+      }
+
+      var message = { subject: subject, message_id: messageId, key: key }
+      if (subject === 'lti.put_data') message.value = value
+
+      try {
+        targetFrame.postMessage(message, platformOrigin)
+      } catch (err) {
+        settle(undefined)
+        return
+      }
+
+      if (timeoutMs > 0) {
+        setTimeout(function () { settle(undefined) }, timeoutMs)
+      } else {
+        // timeoutMs <= 0 means don't wait for a response - the message has already been sent above.
+        settle(undefined)
+      }
+    })
+  }
+})()
+</script>

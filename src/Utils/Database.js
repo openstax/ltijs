@@ -117,6 +117,7 @@ class Database {
     const stateSchema = new Schema({
       state: String,
       query: JSON,
+      storage: JSON, // { platformOrigin, frameName } - only present when lti_storage_target was used at login
       createdAt: { type: Date, expires: 600, default: Date.now }
     })
     stateSchema.index({ state: 1 }, { unique: true })

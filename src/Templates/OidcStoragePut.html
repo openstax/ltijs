@@ -1,0 +1,17 @@
+{{>OidcStorageHandshake.html}}
+<script>
+(function () {
+  var platformOrigin = {{platformOriginJs}}
+  var frameName = {{frameNameJs}}
+  var key = {{keyJs}}
+  var value = {{valueJs}}
+  var timeoutMs = {{putTimeoutMsJs}}
+  var redirectUrl = {{redirectUrlJs}}
+
+  function redirect () {
+    window.location.href = redirectUrl
+  }
+
+  window.ltijsStorageRequest('lti.put_data', key, value, platformOrigin, frameName, timeoutMs).then(redirect, redirect)
+})()
+</script>

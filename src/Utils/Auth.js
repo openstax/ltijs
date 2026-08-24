@@ -76,10 +76,16 @@ class Auth {
     } else if (validationParameters.iss !== decoded.payload.iss) throw new Error('ISS_CLAIM_DOES_NOT_MATCH')
 
     provAuthDebug('Attempting to retrieve registered platform')
+    // decoded.payload.iss/aud are read from the token before signature verification, and when devMode allows
+    // the iss-cookie check above to be skipped, iss flows into the database query below unchecked too - per
+    // RFC 7519 4.1.1, iss must be a string; per 4.1.3, aud must be a string or an array of strings
+    if (typeof decoded.payload.iss !== 'string') throw new Error('INVALID_ISS_CLAIM')
+    if (!Array.isArray(decoded.payload.aud) && typeof decoded.payload.aud !== 'string') throw new Error('INVALID_AUD_CLAIM')
     let platform
     if (!Array.isArray(decoded.payload.aud)) platform = await getPlatform(decoded.payload.iss, decoded.payload.aud, ENCRYPTIONKEY, Database)
     else {
       for (const aud of decoded.payload.aud) {
+        if (typeof aud !== 'string') continue
         platform = await getPlatform(decoded.payload.iss, aud, ENCRYPTIONKEY, Database)
         if (platform) break
       }

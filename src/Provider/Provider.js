@@ -131,7 +131,7 @@ class Provider {
      * @param {Boolean} [options.cookies.secure = false] - Cookie secure parameter. If true, only allows cookies to be passed over https.
      * @param {String} [options.cookies.sameSite = 'Lax'] - Cookie sameSite parameter. If cookies are going to be set across domains, set this parameter to 'None'.
      * @param {String} [options.cookies.domain] - Cookie domain parameter. This parameter can be used to specify a domain so that the cookies set by Ltijs can be shared between subdomains.
-     * @param {Boolean} [options.devMode = false] - If true, does not require the state cookie to be present (If present, it is still validated). This allows ltijs to work on development environments where cookies cannot be set. A missing platform session cookie is always tolerated regardless of this option, since it's expected whenever the browser blocks third-party cookies; ltik is trusted on its own in that case. THIS SHOULD NOT BE USED IN A PRODUCTION ENVIRONMENT.
+     * @param {Boolean} [options.devMode = false] - If true, does not require the state cookie or the platform session cookie to be present (If present, they are still validated). This allows ltijs to work on development environments where cookies cannot be set. THIS SHOULD NOT BE USED IN A PRODUCTION ENVIRONMENT. A missing platform session cookie is also tolerated regardless of this option whenever the original login recovered the state validation value via the LTI Client Side Postmessage storage flow (https://www.imsglobal.org/spec/lti-cs-oidc/v0p1), since that already indicates the browser blocks third-party cookies.
      * @param {Number} [options.tokenMaxAge = 10] - Sets the idToken max age allowed in seconds. Defaults to 10 seconds. If false, disables max age validation.
      * @param {Object} [options.ltiStorage] - Configuration for the LTI Client Side Postmessage storage handshake (https://www.imsglobal.org/spec/lti-cs-oidc/v0p1), used as a fallback when the platform advertises support (via lti_storage_target) and/or when the state cookie can't be read back (e.g. blocked third-party cookies).
      * @param {Number} [options.ltiStorage.putTimeout = 0] - Seconds to wait for the platform's lti.put_data.response before continuing the login redirect. 0 (default) means don't wait at all.
@@ -279,6 +279,11 @@ class Provider {
               localStorageIss = Storage.verifyValue(req.body.lti_storage_iss, state, this.#ENCRYPTIONKEY)
             }
 
+            // True only when the state cookie was genuinely absent and recovery via the LTI Client Side
+            // Postmessage storage flow actually succeeded - carried into the ltik below so the platform
+            // session cookie check can later tolerate the same browser also failing to persist that cookie
+            const stateViaStorage = !validationCookie && isStorageRecovery && !!localStorageIss
+
             const validationParameters = {
               iss: validationCookie || localStorageIss,
               maxAge: this.#tokenMaxAge
@@ -364,7 +369,8 @@ class Provider {
               platformCode,
               contextId,
               user: valid.sub,
-              s: state // Added state to make unique ltiks
+              s: state, // Added state to make unique ltiks
+              viaStorage: stateViaStorage
             }
             // Signing context token
             const newLtik = jwt.sign(newLtikObj, this.#ENCRYPTIONKEY)
@@ -457,11 +463,13 @@ class Provider {
         if (!this.#ltiaas) {
           provMainDebug('Attempting to retrieve matching session cookie')
           const cookieUser = cookies[platformCode]
-          // A missing session cookie is not treated as a failure - it's expected whenever the browser
-          // blocks third-party cookies, and ltik (already verified above) is trusted on its own in that
-          // case. A cookie that IS present but doesn't match is still rejected, unconditionally.
-          if (!cookieUser) provMainDebug('No session cookie found; trusting ltik alone')
-          else if (user.toString() !== cookieUser.toString()) user = false
+          // A missing session cookie is only tolerated when devMode is on, or when this session's state
+          // cookie was itself recovered via the LTI Client Side Postmessage storage flow at login (which
+          // already indicates the browser blocks third-party cookies) - ltik is trusted alone in those cases.
+          // A cookie that IS present but doesn't match is still rejected, unconditionally.
+          if (!cookieUser) {
+            if (!this.#devMode && !validLtik.viaStorage) user = false
+          } else if (user.toString() !== cookieUser.toString()) user = false
         }
 
         if (user) {
@@ -688,7 +696,7 @@ class Provider {
                       ' |______|_|  |_____|\\____/|_____/ \n\n', message)
         }
       }
-      if (this.#devMode && !conf.silent) console.log('\nStarting in Dev Mode, state validation cookies will not be required. THIS SHOULD NOT BE USED IN A PRODUCTION ENVIRONMENT!')
+      if (this.#devMode && !conf.silent) console.log('\nStarting in Dev Mode, state validation and session cookies will not be required. THIS SHOULD NOT BE USED IN A PRODUCTION ENVIRONMENT!')
 
       // Sets up gracefull shutdown
       process.on('SIGINT', async () => {

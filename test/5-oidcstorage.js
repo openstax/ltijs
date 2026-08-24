@@ -255,7 +255,7 @@ describe('Testing LTI Client Side postMessage storage handshake (LTI-CS-OIDC v0.
     })
   })
 
-  it('Launch is expected to succeed with the state cookie present but the platform session cookie entirely absent (the real third-party-cookie-blocked case)', async () => {
+  it('Launch is expected to still fail when the state cookie was present (no storage fallback used) and the platform session cookie is absent', async () => {
     const state = randomState()
 
     const token = JSON.parse(JSON.stringify(tokenValid))
@@ -266,11 +266,11 @@ describe('Testing LTI Client Side postMessage storage handshake (LTI-CS-OIDC v0.
     lti.onConnect((token, req, res) => res.sendStatus(200))
     nockKeyset()
 
-    // Only the state-validation cookie is sent - no platform session cookie at all, simulating a browser
-    // that blocks third-party cookies entirely (the exact scenario the previous unconditional
-    // `if (!cookieUser) user = false` broke)
+    // The state cookie was present at login, so this login never went through storage-fallback recovery
+    // (viaStorage stays false) - an absent session cookie is only tolerated when it does, or in devMode,
+    // so this must still fail
     return chai.request.execute(lti.app).post(url).type('json').send({ id_token: payload, state }).set('Cookie', ['state' + state + '=' + SIGNED_ISS_COOKIE_VALUE + '; Path=/; HttpOnly;']).then(res => {
-      expect(res).to.have.status(200)
+      expect(res).to.have.status(401)
     })
   })
 
@@ -365,6 +365,32 @@ describe('Testing LTI Client Side postMessage storage handshake (LTI-CS-OIDC v0.
       lti_storage_recovery: '1',
       lti_storage_iss: signedIss
     }).set('Cookie', [SIGNED_SESSION_COOKIE]).then(res => {
+      expect(res).to.have.status(200)
+    })
+  })
+
+  it('Recovery resubmission that genuinely used storage-fallback recovery is expected to succeed even with the platform session cookie entirely absent (the real third-party-cookie-blocked case)', async () => {
+    const state = randomState()
+    await lti.Database.Insert(false, 'state', { state, query: {}, storage: { platformOrigin: PLATFORM_ORIGIN, frameName: '_parent' } })
+
+    const token = JSON.parse(JSON.stringify(tokenValid))
+    token.nonce = randomState()
+    const payload = signToken(token, KID)
+    const url = await lti.appRoute()
+    const signedIss = Storage.signValue(ISS, state, ENCRYPTIONKEY)
+
+    lti.onConnect((token, req, res) => res.sendStatus(200))
+    nockKeyset()
+
+    // No Cookie header at all - the state cookie was never received (that's why recovery was needed), and
+    // no platform session cookie is sent either, simulating a browser that blocks third-party cookies
+    // entirely
+    return chai.request.execute(lti.app).post(url).type('json').send({
+      id_token: payload,
+      state,
+      lti_storage_recovery: '1',
+      lti_storage_iss: signedIss
+    }).then(res => {
       expect(res).to.have.status(200)
     })
   })

@@ -8,6 +8,7 @@
     "node": ">=12.13.0"
   },
   "scripts": {
+    "pretest": "npm run build:clean",
     "test": "MONGOMS_VERSION=7.0.3 NODE_TLS_REJECT_UNAUTHORIZED=0 nyc mocha",
     "clean": "rm -rf dist",
     "build:js": "babel src -d dist",

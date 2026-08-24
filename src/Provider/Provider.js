@@ -65,8 +65,8 @@ class Provider {
   #dynamicRegistrationCallback = async (req, res, next) => {
     try {
       if (typeof req.query.openid_configuration !== 'string' || !req.query.openid_configuration) return res.status(400).send({ status: 400, error: 'Bad Request', details: { message: 'Missing parameter: "openid_configuration".' } })
-      const registrationToken = typeof req.query.registration_token === 'string' ? req.query.registration_token : undefined
-      const message = await this.DynamicRegistration.register(req.query.openid_configuration, registrationToken)
+      if (req.query.registration_token !== undefined && typeof req.query.registration_token !== 'string') return res.status(400).send({ status: 400, error: 'Bad Request', details: { message: 'Invalid parameter: "registration_token".' } })
+      const message = await this.DynamicRegistration.register(req.query.openid_configuration, req.query.registration_token)
       res.setHeader('Content-type', 'text/html')
       res.send(message)
     } catch (err) {
@@ -291,8 +291,9 @@ class Provider {
 
             const valid = await Auth.validateToken(idtoken, this.#devMode, validationParameters, this.getPlatform, this.#ENCRYPTIONKEY, this.Database)
 
-            // Retrieve State object from Database
-            const savedState = await this.Database.Get(false, 'state', { state })
+            // Retrieve State object from Database, reusing the lookup above if the storage-recovery check
+            // already performed it
+            const savedState = cachedStateDoc !== undefined ? cachedStateDoc : await this.Database.Get(false, 'state', { state })
 
             // Deletes state validation cookie and Database entry
             res.clearCookie('state' + state, this.#cookieOptions)

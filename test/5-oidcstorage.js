@@ -364,7 +364,7 @@ describe('Testing LTI Client Side postMessage storage handshake (LTI-CS-OIDC v0.
       state,
       lti_storage_recovery: '1',
       lti_storage_iss: signedIss
-    }).set('Cookie', [SIGNED_SESSION_COOKIE]).then(res => {
+    }).then(res => {
       expect(res).to.have.status(200)
     })
   })

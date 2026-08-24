@@ -255,6 +255,45 @@ describe('Testing LTI Client Side postMessage storage handshake (LTI-CS-OIDC v0.
     })
   })
 
+  it('Launch is expected to succeed with the state cookie present but the platform session cookie entirely absent (the real third-party-cookie-blocked case)', async () => {
+    const state = randomState()
+
+    const token = JSON.parse(JSON.stringify(tokenValid))
+    token.nonce = randomState()
+    const payload = signToken(token, KID)
+    const url = await lti.appRoute()
+
+    lti.onConnect((token, req, res) => res.sendStatus(200))
+    nockKeyset()
+
+    // Only the state-validation cookie is sent - no platform session cookie at all, simulating a browser
+    // that blocks third-party cookies entirely (the exact scenario the previous unconditional
+    // `if (!cookieUser) user = false` broke)
+    return chai.request.execute(lti.app).post(url).type('json').send({ id_token: payload, state }).set('Cookie', ['state' + state + '=' + SIGNED_ISS_COOKIE_VALUE + '; Path=/; HttpOnly;']).then(res => {
+      expect(res).to.have.status(200)
+    })
+  })
+
+  it('Launch is expected to still fail when the platform session cookie is present but does not match the session user', async () => {
+    const state = randomState()
+
+    const token = JSON.parse(JSON.stringify(tokenValid))
+    token.nonce = randomState()
+    const payload = signToken(token, KID)
+    const url = await lti.appRoute()
+
+    lti.onConnect((token, req, res) => res.sendStatus(200))
+    nockKeyset()
+
+    // Signed session cookie for the SAME platformCode, but a WRONG user value ('999' instead of '2') -
+    // this must still be rejected; only a genuinely MISSING cookie is tolerated, not a mismatched one
+    const wrongUserSessionCookie = 'ltiaHR0cDovL2xvY2FsaG9zdC9tb29kbGVDbGllbnRJZDEy=s%3A999.0g0nuqC2STrd2%2FVps19wZD62aNwUY1ZzdnEiBXX2xIg; Path=/; HttpOnly; SameSite=None'
+
+    return chai.request.execute(lti.app).post(url).type('json').send({ id_token: payload, state }).set('Cookie', ['state' + state + '=' + SIGNED_ISS_COOKIE_VALUE + '; Path=/; HttpOnly;', wrongUserSessionCookie]).then(res => {
+      expect(res).to.have.status(401)
+    })
+  })
+
   it('Callback with cookie absent, no storage recorded, is expected to fail exactly as before (unchanged)', async () => {
     const state = randomState()
     const token = JSON.parse(JSON.stringify(tokenValid))

@@ -564,7 +564,7 @@ class Provider {
           // round-trip (e.g. blocked third-party cookies)
           const storageTargetRequested = typeof params.lti_storage_target === 'string' && params.lti_storage_target.length > 0
           const storage = storageTargetRequested
-            ? { platformOrigin: new URL(await platform.platformAuthEndpoint()).origin, frameName: Storage.sanitizeFrameName(params.lti_storage_target) }
+            ? { platformOrigin: Storage.mapStorageOrigin(new URL(await platform.platformAuthEndpoint()).origin), frameName: Storage.sanitizeFrameName(params.lti_storage_target) }
             : undefined
 
           provMainDebug('Target Link URI: ', params.target_link_uri)

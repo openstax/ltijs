@@ -47,6 +47,15 @@ class Storage {
   }
 
   /**
+   * @description Canvas changed its OIDC endpoints to https://sso.canvaslms.com but old records might still have https://canvas.instructure.com
+   */
+  static mapStorageOrigin (origin) {
+    return typeof origin === 'string'
+      ? origin.replace(/^https:\/\/canvas(\.[^.]+)?\.instructure\.com$/, 'https://sso$1.canvaslms.com')
+      : origin
+  }
+
+  /**
    * @description Signs the iss value (plus the binding state and a discriminating typ) for storage on the
    * platform side, mirroring the trust the state cookie provides today.
    */

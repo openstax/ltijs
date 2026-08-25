@@ -98,6 +98,21 @@ describe('Testing Storage utility (LTI-CS-OIDC v0.1)', function () {
     expect(Storage.sanitizeFrameName(undefined)).to.equal('_parent')
   })
 
+  it('Storage.mapStorageOrigin expected to rewrite canvas[.suffix].instructure.com to sso[.suffix].canvaslms.com', () => {
+    expect(Storage.mapStorageOrigin('https://canvas.instructure.com')).to.equal('https://sso.canvaslms.com')
+    expect(Storage.mapStorageOrigin('https://canvas.test.instructure.com')).to.equal('https://sso.test.canvaslms.com')
+    expect(Storage.mapStorageOrigin('https://canvas.beta.instructure.com')).to.equal('https://sso.beta.canvaslms.com')
+  })
+
+  it('Storage.mapStorageOrigin expected to leave non-Canvas origins (and non-string input) unchanged', () => {
+    expect(Storage.mapStorageOrigin('http://localhost')).to.equal('http://localhost')
+    expect(Storage.mapStorageOrigin('https://moodle.example.com')).to.equal('https://moodle.example.com')
+    // must anchor the match - a lookalike subdomain or suffix should not be rewritten
+    expect(Storage.mapStorageOrigin('https://notcanvas.instructure.com')).to.equal('https://notcanvas.instructure.com')
+    expect(Storage.mapStorageOrigin('https://canvas.instructure.com.evil.com')).to.equal('https://canvas.instructure.com.evil.com')
+    expect(Storage.mapStorageOrigin(undefined)).to.equal(undefined)
+  })
+
   it('Storage.buildKey expected to always derive the key from state', () => {
     expect(Storage.buildKey('abc123')).to.equal('ltijs_state_abc123')
   })

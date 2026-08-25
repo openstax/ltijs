@@ -79,4 +79,34 @@ describe('Testing Dynamic registration Service', function () {
     await platform.platformActive(true)
     await expect(platform.platformActive()).to.eventually.equal(true)
   })
+  it('Dynamic Registration endpoint with openid_configuration as an object (NoSQL/type injection attempt) is expected to return 400', async () => {
+    const url = lti.dynRegRoute()
+    return chai.request.execute(lti.app).get(url + '?openid_configuration[$ne]=1&registration_token=abc').then(res => {
+      expect(res).to.have.status(400)
+    })
+  })
+  it('Dynamic Registration endpoint receiving a configuration document with a non-string issuer is expected to fail cleanly, not register a broken platform', async () => {
+    const url = lti.dynRegRoute()
+    const badConfiguration = { ...configurationInformation, issuer: { $ne: null }, registration_endpoint: 'http://localhost/moodlebadissuer/register' }
+
+    nock('http://localhost/moodlebadissuer').get('/openid_configuration').reply(200, badConfiguration)
+    nock('http://localhost/moodlebadissuer').post('/register').reply(200, registrationResponse)
+
+    return chai.request.execute(lti.app).get(url).query({ openid_configuration: 'http://localhost/moodlebadissuer/openid_configuration' }).then(res => {
+      expect(res).to.have.status(500)
+      expect(res.body.details.message).to.equal('INVALID_ISSUER_CONFIGURATION')
+    })
+  })
+  it('Dynamic Registration endpoint receiving a registration response with a non-string client_id is expected to fail cleanly, not register a broken platform', async () => {
+    const url = lti.dynRegRoute()
+    const goodConfiguration = { ...configurationInformation, issuer: 'http://localhost/moodlebadclientid', registration_endpoint: 'http://localhost/moodlebadclientid/register' }
+
+    nock('http://localhost/moodlebadclientid').get('/openid_configuration').reply(200, goodConfiguration)
+    nock('http://localhost/moodlebadclientid').post('/register').reply(200, { client_id: { $ne: null } })
+
+    return chai.request.execute(lti.app).get(url).query({ openid_configuration: 'http://localhost/moodlebadclientid/openid_configuration' }).then(res => {
+      expect(res).to.have.status(500)
+      expect(res.body.details.message).to.equal('INVALID_CLIENT_ID_REGISTRATION_RESPONSE')
+    })
+  })
 })

@@ -1,0 +1,26 @@
+{{>OidcStorageHandshake.html}}
+<form id="ltijs_storage_recovery" style="display: none;" method="POST">
+  <input type="hidden" name="id_token" value="{{idTokenAttr}}" />
+  <input type="hidden" name="state" value="{{stateAttr}}" />
+  <input type="hidden" name="lti_storage_recovery" value="1" />
+  <input type="hidden" name="lti_storage_iss" id="ltijs_storage_recovery_iss" value="" />
+</form>
+<script>
+(function () {
+  var platformOrigin = {{platformOriginJs}}
+  var frameName = {{frameNameJs}}
+  var key = {{keyJs}}
+  var timeoutMs = {{getTimeoutMsJs}}
+
+  function submitForm (response) {
+    var iss = ''
+    if (response && response.subject === 'lti.get_data.response' && typeof response.value === 'string') {
+      iss = response.value
+    }
+    document.getElementById('ltijs_storage_recovery_iss').value = iss
+    document.getElementById('ltijs_storage_recovery').submit()
+  }
+
+  window.ltijsStorageRequest('lti.get_data', key, undefined, platformOrigin, frameName, timeoutMs).then(submitForm, function () { submitForm(undefined) })
+})()
+</script>

@@ -97,6 +97,7 @@ class DynamicRegistration {
     provDynamicRegistrationDebug('Starting dynamic registration process')
     // Get Platform registration configurations
     const configuration = await got.get(openidConfiguration).json()
+    if (typeof configuration.issuer !== 'string') throw new Error('INVALID_ISSUER_CONFIGURATION')
     provDynamicRegistrationDebug('Attempting to register Platform with issuer: ', configuration.issuer)
     // Building registration object
     const messages = [{ type: 'LtiResourceLinkRequest' }]
@@ -125,6 +126,7 @@ class DynamicRegistration {
     provDynamicRegistrationDebug(registration)
     provDynamicRegistrationDebug('Sending Tool registration request')
     const registrationResponse = await got.post(configuration.registration_endpoint, { json: registration, headers: registrationToken ? { Authorization: 'Bearer ' + registrationToken } : undefined }).json()
+    if (typeof registrationResponse.client_id !== 'string') throw new Error('INVALID_CLIENT_ID_REGISTRATION_RESPONSE')
 
     // Registering Platform
     const platformName = (configuration['https://purl.imsglobal.org/spec/lti-platform-configuration'] ? configuration['https://purl.imsglobal.org/spec/lti-platform-configuration'].product_family_code : 'Platform') + '_DynReg_' + crypto.randomBytes(16).toString('hex')

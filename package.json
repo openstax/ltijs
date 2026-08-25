@@ -1,6 +1,6 @@
 {
-  "name": "ltijs",
-  "version": "5.9.9",
+  "name": "@openstax/ltijs",
+  "version": "6.0.1",
   "description": "Easily turn your web application into a LTI 1.3 Learning Tool.",
   "main": "index.js",
   "engineStrict": true,
@@ -8,15 +8,24 @@
     "node": ">=12.13.0"
   },
   "scripts": {
+    "pretest": "npm run build:clean",
     "test": "MONGOMS_VERSION=7.0.3 NODE_TLS_REJECT_UNAUTHORIZED=0 nyc mocha",
+    "clean": "rm -rf dist",
     "build:js": "babel src -d dist",
     "build:html": "node copy-html-files.js",
     "build": "npm run build:js && npm run build:html",
+    "build:clean": "npm run clean && npm run build",
+    "prepublishOnly": "npm install",
+    "prepare": "npm run build:clean",
+    "prestart": "npm run build:clean",
     "start": "node index.js"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Cvmcosta/ltijs.git"
+    "url": "git+https://github.com/openstax/ltijs.git"
   },
   "keywords": [
     "lti",
